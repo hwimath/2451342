@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <title>함수의 극한의 응용</title>
+  <!-- MathJax 불러오기 (LaTeX 수식 렌더링용) -->
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" defer></script>
+  <style>
+    html, body {
+      margin: 0; padding: 0;
+      background-color: black;
+      color: white;
+      font-family: sans-serif;
+    }
+    #container {
+      max-width: 700px;
+      margin: 0 auto;
+      padding: 1rem;
+    }
+    .hidden { display: none; }
+    .question-box {
+      margin: 1rem 0;
+      padding: 1rem;
+      border: 1px solid white;
+    }
+    .choice {
+      margin: 0.5rem 0;
+      cursor: pointer;
+      padding: 0.5rem;
+      border: 1px solid white;
+    }
+    .choice:hover {
+      background-color: #222;
+    }
+    /* 에너지바: 숫자로 표시하지 않고, 폭(넓이)으로만 시각화 */
+    #energyBarContainer {
+      width: 100%;
+      height: 10px;
+      background-color: white;
+      margin: 1rem 0;
+      position: relative;
+    }
+    #energyBar {
+      background-color: black;
+      width: 100%;
+      height: 100%;
+      transition: width 0.2s linear;
+      position: absolute; left: 0; top: 0;
+    }
+    /* 전체 게임 시간(경과 시간) 표시 */
+    #totalTimeDisplay {
+      margin-top: 0.5rem;
+    }
+    #startScreen, #quizScreen, #endScreen {
+      border: 1px solid white;
+      padding: 1rem;
+      margin-top: 1rem;
+    }
+    #response {
+      margin-top: 1rem;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+<div id="container">
+  <h1>함수의 극한의 응용</h1>
+
+  <!-- 첫 화면: 사용자 이름, 난이도 선택 -->
+  <div id="startScreen">
+    <label>이름: <input type="text" id="playerName" /></label>
+    <p>난이도 선택:</p>
+    <label><input type="radio" name="difficulty" value="hardest"/> 최상 (20초)</label><br/>
+    <label><input type="radio" name="difficulty" value="hard"/> 상 (30초)</label><br/>
+    <label><input type="radio" name="difficulty" value="medium"/> 중 (40초)</label><br/>
+    <label><input type="radio" name="difficulty" value="easy" checked/> 하 (시간제한 없음)</label><br/>
+    <button onclick="startGame()">게임 시작</button>
+  </div>
+
+  <!-- 퀴즈 진행 화면 -->
+  <div id="quizScreen" class="hidden">
+    <div>남은 기회: <span id="life">3</span></div>
+    <div>점수: <span id="score">0</span></div>
+    <div id="energyBarContainer"><div id="energyBar"></div></div>
+    <div>전체 게임 경과 시간: <span id="totalTimeDisplay">0</span> 초</div>
+    <div id="questionContainer"></div>
+  </div>
+
+  <!-- 종료 화면 -->
+  <div id="endScreen" class="hidden">
+    <h2>게임이 종료되었습니다.</h2>
+    <p>최종 점수: <span id="finalScore">0</span></p>
+    <p>총 경과 시간: <span id="finalTime">0</span> 초</p>
+    <button onclick="sendScore()">점수전송</button>
+    <div id="response"></div>
+  </div>
+</div>
+
+<script>
+// MathJax 렌더링용 함수 (동적으로 문제를 추가할 때마다 호출)
+function renderMath() {
+  // MathJax 3.x 방식
+  MathJax.typeset();
+}
+
+// 서버로 점수를 전송하는 함수
+function saveData(game, name, score, elapsedTime) {
+    const FUNCTION_URL = "https://us-central1-record-f420d.cloudfunctions.net/report";
+
+    const requestData = {
+        game,
+        name,
+        score: parseInt(score, 10),
+        elapsedTime: parseInt(elapsedTime, 10)
+    };
+
+    fetch(FUNCTION_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestData)
+    })
+    .then(response => {
+        return response.json().then(responseData => {
+          if (response.ok) {
+            document.getElementById('response').innerText = 
+              `성공: ${JSON.stringify(responseData, null, 2)}`;
+          } else {
+            document.getElementById('response').innerText = 
+              `오류: ${JSON.stringify(responseData, null, 2)}`;
+          }
+        });
+    })
+    .catch(error => {
+        console.error('요청 실패:', error);
+        document.getElementById('response').innerText = 
+            `네트워크 오류: ${error.message}`;
+    });
+}
+
+// ◈ 문제(생략했던 11,33,35,37,39,43,45,47,49 제외) 목록
+// "문항번호"는 표시하지 말라는 요구사항에 따라, 그냥 Q: ... 식으로만 보이도록 만듭니다.
+// 문제 순서와 선택지 순서는 JS에서 섞어 줄 것입니다.
+const questionsData = [
+  {
+    // 문제 1
+    q: "아래 극한을 만족하는 상수 \\(a, b\\)는 무엇인가?<br/>"
+       + "\\( \\lim_{x\\to 1} \\dfrac{a x + b}{x - 1} = 2 \\)",
+    choices: [
+      "\\((1, -1)\\)",
+      "\\((2, -2)\\)",  // correct
+      "\\((2,  2)\\)",
+      "\\((3, -3)\\)"
+    ],
+    correct: 1
+  },
+  {
+    // 문제 3
+    q: "다음 극한이 \\(-1\\)이 되도록 하는 \\(a,b\\)는?<br/>"
+       + "\\( \\lim_{x\\to -1} \\dfrac{x + 1}{2x^2 + a x + b} = -1 \\)",
+    choices: [
+      "\\((3, 1)\\)",   // correct
+      "\\((4, 2)\\)",
+      "\\((2, 1)\\)",
+      "\\((3, 2)\\)"
+    ],
+    correct: 0
+  },
+  {
+    // 문제 5
+    q: "다음 극한을 \\(1\\)로 만드는 \\(a,b\\)는?<br/>"
+       + "\\( \\lim_{x\\to 4} \\dfrac{a\\sqrt{x} + b}{x - 4} = 1 \\)",
+    choices: [
+      "\\((2, -2)\\)",
+      "\\((3, -6)\\)",
+      "\\((4, -8)\\)",  // correct
+      "\\((4,  2)\\)"
+    ],
+    correct: 2
+  },
+  {
+    // 문제 7
+    q: "아래 식을 만족하게 하는 \\(a, b\\)를 구하시오.<br/>"
+       + "\\( \\lim_{x\\to 3} \\dfrac{\\sqrt{x + a} - b}{x - 3} = \\dfrac{1}{4} \\)",
+    choices: [
+      "\\((1, 2)\\)",   // correct
+      "\\((2, 1)\\)",
+      "\\((1, -2)\\)",
+      "\\((-1, 1)\\)"
+    ],
+    correct: 0
+  },
+  {
+    // 문제 9
+    q: "아래 극한값을 \\(b\\)라 할 때, 유한한 \\(b\\)가 되도록 하는 \\(a, b\\)는?<br/>"
+       + "\\( \\lim_{x\\to 2}\\dfrac{\\sqrt{x + a} - 2}{x - 2} = b \\)",
+    choices: [
+      "\\((2, \\tfrac12)\\)",
+      "\\((2, \\tfrac14)\\)",  // correct
+      "\\((4, 1)\\)",
+      "\\((4, \\tfrac14)\\)"
+    ],
+    correct: 1
+  },
+  {
+    // 문제 13
+    q: "아래 극한이 \\(b\\)가 되도록 \\(a,b\\)를 구하시오.<br/>"
+       + "\\( \\lim_{x\\to 0}\\dfrac{\\sqrt{a x + 4} - \\sqrt{2x + a}}{x} = b \\)",
+    choices: [
+      "\\((2, 1)\\)",
+      "\\((4, \\tfrac12)\\)", // correct
+      "\\((4, 2)\\)",
+      "\\((2, \\tfrac12)\\)"
+    ],
+    correct: 1
+  },
+  {
+    // 문제 15
+    q: "다음 식을 만족하게 하는 \\(a,b\\)는?<br/>"
+       + "\\( \\lim_{x\\to -1}\\dfrac{2x^2 + a x + b}{x + 1} = 5 \\)",
+    choices: [
+      "\\((7, 9)\\)",
+      "\\((9, 7)\\)",  // correct
+      "\\((5, 5)\\)",
+      "\\((3, 1)\\)"
+    ],
+    correct: 1
+  },
+  {
+    // 문제 17
+    q: "아래 극한이 \\(5\\)가 되도록 하는 \\(a,b\\)는?<br/>"
+       + "\\( \\lim_{x\\to 2}\\dfrac{x^2 + a x + b}{x - 2} = 5 \\)",
+    choices: [
+      "\\((1, -6)\\)",  // correct
+      "\\((3, -2)\\)",
+      "\\((5, -10)\\)",
+      "\\((2, -4)\\)"
+    ],
+    correct: 0
+  },
+  {
+    // 문제 19
+    q: "다음 값이 \\(\\tfrac{1}{8}\\)이 되도록 하는 \\(a,b\\)는?<br/>"
+       + "\\( \\lim_{x\\to 2}\\dfrac{x - 2}{x^2 + a x + b} = \\tfrac{1}{8}\\)",
+    choices: [
+      "\\((2, -4)\\)",
+      "\\((4, -12)\\)", // correct
+      "\\((6, -20)\\)",
+      "\\((4, -4)\\)"
+    ],
+    correct: 1
+  },
+  {
+    // 문제 21
+    q: "다음 식이 성립할 때 \\(a+b\\)의 값을 구하시오.<br/>"
+       + "\\(\\lim_{x\\to -1}\\dfrac{x - 1}{x^2 + a x + b} = \\tfrac13\\)",
+    choices: [
+      "\\(-3\\)",
+      "\\(-5\\)",
+      "\\(-7\\)",  // correct
+      "\\(3\\)"
+    ],
+    correct: 2
+  },
+  {
+    // 문제 23
+    q: "아래 극한이 \\(4\\)가 되도록 하는 \\(a,b\\)를 구하시오.<br/>"
+       + "\\(\\lim_{x\\to 1}\\dfrac{x^2 - (a+1)x + a}{x^2 - b} = 4\\)",
+    choices: [
+      "\\((1, 1)\\)",
+      "\\((-7, 1)\\)", // correct
+      "\\((-1, 1)\\)",
+      "\\((-7, -1)\\)"
+    ],
+    correct: 1
+  },
+  {
+    // 문제 25
+    q: "아래 식을 만족시키는 \\(a,b\\)는?<br/>"
+       + "\\(\\lim_{x\\to 1}\\dfrac{x^2 + a x - b}{x^3 - 1} = 3\\)",
+    choices: [
+      "\\((7, 8)\\)",   // correct
+      "\\((3, 4)\\)",
+      "\\((6, 7)\\)",
+      "\\((8, 7)\\)"
+    ],
+    correct: 0
+  },
+  {
+    // 문제 27
+    q: "다음 극한을 \\(4\\sqrt{3}\\)으로 만드는 \\(a,b\\)는?<br/>"
+       + "\\(\\lim_{x\\to 2}\\dfrac{a x + b}{\\sqrt{x + 1} - \\sqrt{3}} = 4\\sqrt{3}\\)",
+    choices: [
+      "\\((2, -4)\\)",  // correct
+      "\\((4, -2)\\)",
+      "\\((2,  4)\\)",
+      "\\((4, -4)\\)"
+    ],
+    correct: 0
+  },
+  {
+    // 문제 29
+    q: "함수 \\(f\\)에 대하여 \\(\\lim_{x\\to 1} f(x - 1) = 1\\) 이라면,"
+       + "\\(\\lim_{x\\to 2} f(x - 2)\\)의 값은?",
+    choices: [
+      "0",
+      "1",   // correct
+      "2",
+      "존재하지 않음"
+    ],
+    correct: 1
+  },
+  {
+    // 문제 31
+    q: "\\(\\lim_{x\\to 2}\\,[f(x) - 3] = 5\\)라면, "
+       + "\\(\\lim_{x\\to 2} f(x)\\)의 값은?",
+    choices: [
+      "3",
+      "5",
+      "8",   // correct
+      "무한대"
+    ],
+    correct: 2
+  },
+  {
+    // 문제 41
+    q: "다항함수 \\(f(x)=\\dfrac{x^2 + b x + c}{x^2 - x - 2}\\)가 "
+       + "\\(\\lim_{x\\to 2}f(x)=1,\\; \\lim_{x\\to -2}f(x)=2\\)를 만족할 때, "
+       + "\\(f(3)\\)의 값은?",
+    choices: [
+      "1",
+      "2",
+      "3",
+      "다른 값"  // 정답
+    ],
+    correct: 3
+  },
+  {
+    // 문제 51
+    q: "모든 양의 실수 \\(x\\)에 대해 \\(x^2 + 1 < f(x) < 3x^2 - 1\\)을 만족하는 함수 \\(f\\)가 존재한다. "
+       + "그렇다면 \\(\\lim_{x\\to\\infty}\\dfrac{f(x)}{x^2}\\)의 값으로 가능한 것은?",
+    choices: [
+      "1과 3 사이",  // correct
+      "반드시 3",
+      "반드시 1",
+      "존재하지 않음"
+    ],
+    correct: 0
+  },
+  {
+    // 문제 53
+    q: "모든 실수 \\(x\\)에 대해 \\(x^2 + 2 \\le f(x) \\le x^2 + 5\\)를 만족하는 함수가 있다."
+       + " \\(\\lim_{x\\to\\infty}\\dfrac{f(x)}{x^2}\\) 의 값은?",
+    choices: [
+      "2",
+      "5",
+      "2와 5 사이의 값",
+      "1"    // correct
+    ],
+    correct: 3
+  },
+  {
+    // 문제 55
+    q: "\\(x>\\tfrac12\\)에서 정의된 \\(f\\)가 모든 \\(x>\\tfrac12\\)에 대해 "
+       + "\\(2x-1 < f(x) < 2x+1\\)을 만족한다고 하자. "
+       + "\\(\\lim_{x\\to\\infty}\\dfrac{\\{f(x)\\}^2}{x^2 - x + 1}\\)의 값은?",
+    choices: [
+      "0",
+      "4",    // correct
+      "2",
+      "값이 정해지지 않음"
+    ],
+    correct: 1
+  }
+];
+
+// 난수 배열 섞기 함수
+function shuffleArray(arr) {
+  for (let i=arr.length-1; i>0; i--) {
+    const j = Math.floor(Math.random()* (i+1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+
+// 문제 목록을 섞어서 사용
+shuffleArray(questionsData);
+
+// 전역 상태
+let currentIndex = 0;       // 현재 문제 인덱스
+let score = 0;              // 점수
+let life = 3;               // 남은 기회
+let difficultyTime = 0;     // 난이도별 문제당 제한시간 (초)
+let timeInterval = null;    // 문제 타이머 setInterval
+let energyInterval = null;  // 에너지바 setInterval
+let questionTimeLeft = 0;   // 현재 문제에 남은 시간
+let totalTime = 0;          // 전체 경과 시간(초)
+let totalTimeInterval = null;
+let playerName = "";
+
+function startGame() {
+  playerName = document.getElementById("playerName").value.trim();
+  if (!playerName) {
+    alert("이름을 입력하세요!");
+    return;
+  }
+
+  // 난이도 선택
+  const diffs = document.getElementsByName("difficulty");
+  let diffVal = "easy";
+  for (let r of diffs) {
+    if (r.checked) {
+      diffVal = r.value;
+      break;
+    }
+  }
+
+  switch(diffVal) {
+    case "hardest": difficultyTime = 20; break;
+    case "hard":    difficultyTime = 30; break;
+    case "medium":  difficultyTime = 40; break;
+    case "easy":    difficultyTime = 0;  break; // 시간제한 없음
+  }
+
+  // 화면 전환
+  document.getElementById("startScreen").classList.add("hidden");
+  document.getElementById("quizScreen").classList.remove("hidden");
+
+  // 전체 경과시간 측정용 타이머
+  totalTimeInterval = setInterval(()=>{
+    totalTime++;
+    document.getElementById("totalTimeDisplay").innerText = totalTime;
+  },1000);
+
+  // 첫 문제 표시
+  showQuestion();
+}
+
+function showQuestion() {
+  // 모든 문제를 한 바퀴 다 풀면, 그 뒤부터는 무한 반복(무작위) => 요구사항 9
+  if (currentIndex >= questionsData.length) {
+    // 무한 랜덤 출제
+    currentIndex = Math.floor(Math.random()*questionsData.length);
+  }
+
+  const qData = questionsData[currentIndex];
+  
+  // 선택지도 섞어야 함
+  let choiceIndices = [0,1,2,3];
+  shuffleArray(choiceIndices);
+
+  // DOM 구성
+  const container = document.getElementById("questionContainer");
+  container.innerHTML = "";
+  const qBox = document.createElement("div");
+  qBox.className = "question-box";
+  qBox.innerHTML = "<div>" + qData.q + "</div>";
+  
+  // 선택지 표시
+  choiceIndices.forEach((choiceIdx)=>{
+    const divChoice = document.createElement("div");
+    divChoice.className = "choice";
+    divChoice.innerHTML = qData.choices[choiceIdx];
+    divChoice.onclick = ()=> {
+      // 정답 여부 판단
+      // qData.correct 는 '원래' 정답의 인덱스, choiceIdx 는 섞인 인덱스
+      // 섞이기 전 correct == choiceIdx 라면 정답.
+      // 다만, 우리는 섞기 전 correct를 알고, 섞인 배열에서 choiceIdx가 correct인지 확인해야 함.
+      // 즉, '원래' 정답 choiceIdx = qData.correct
+      // 실제 누른 건 '섞인' choiceIdx
+      // 답이 맞으려면 choiceIdx == qData.correct 여야 함. 
+      // 그러나 위에서 우리가 choiceIndices 라는 배열을 이용해 choices를 섞었으므로,
+      // 정답 인덱스도 동일하게 재매핑해야 함.
+      // 정답의 '섞인' 위치 = choiceIndices.findIndex(x => x===qData.correct).
+      const correctRemapped = choiceIndices.findIndex(x=> x === qData.correct);
+      if (choiceIdx === qData.correct) {
+        // 사실상 "원래 인덱스가 정답" 과 "현재 클릭한" 이 같은 경우
+        handleAnswer(true);
+      } else {
+        handleAnswer(false, qData.choices[qData.correct]);
+      }
+    };
+    qBox.appendChild(divChoice);
+  });
+
+  container.appendChild(qBox);
+  renderMath(); // 수식 렌더링
+
+  // 에너지바 초기화
+  clearInterval(timeInterval);
+  clearInterval(energyInterval);
+
+  if (difficultyTime>0) {
+    questionTimeLeft = difficultyTime;
+    // 에너지바 100%로 세팅
+    const bar = document.getElementById("energyBar");
+    bar.style.width = "100%";
+
+    energyInterval = setInterval(()=>{
+      questionTimeLeft--;
+      const ratio = (questionTimeLeft / difficultyTime)*100;
+      bar.style.width = ratio + "%";
+      if (questionTimeLeft <= 0) {
+        // 시간 초과 -> 오답 처리
+        clearInterval(energyInterval);
+        handleAnswer(false, qData.choices[qData.correct]);
+      }
+    },1000);
+  } else {
+    // 하 난이도 => 시간 제한 없음
+    document.getElementById("energyBar").style.width = "100%";
+  }
+}
+
+// 정답 처리
+function handleAnswer(isCorrect, correctText="") {
+  if (isCorrect) {
+    // 난이도별 점수
+    let pts = 0;
+    // difficultyTime: 20->최상(20점), 30->상(15점), 40->중(13점), 0->하(10점)
+    switch(difficultyTime) {
+      case 20: pts = 20; break;
+      case 30: pts = 15; break;
+      case 40: pts = 13; break;
+      default: pts = 10; break;
+    }
+    score += pts;
+    document.getElementById("score").innerText = score;
+  } else {
+    life--;
+    document.getElementById("life").innerText = life;
+    alert("오답!\n정답: " + correctText);
+    if (life <= 0) {
+      // 게임 종료
+      endGame();
+      return;
+    }
+  }
+  currentIndex++;
+  clearInterval(energyInterval);
+  showQuestion();
+}
+
+// 게임 종료
+function endGame() {
+  clearInterval(energyInterval);
+  clearInterval(totalTimeInterval);
+  document.getElementById("quizScreen").classList.add("hidden");
+  document.getElementById("endScreen").classList.remove("hidden");
+  document.getElementById("finalScore").innerText = score;
+  document.getElementById("finalTime").innerText = totalTime;
+}
+
+function sendScore() {
+  saveData("함수의 극한의 응용", playerName, score, totalTime);
+}
+</script>
+
+</body>
+</html>
